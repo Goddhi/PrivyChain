@@ -1,1 +1,18 @@
 go.sum
+
+node_modules
+.env
+.DS_Store
+dist
+
+# Logs
+logs
+npm-debug.log*
+yarn-debug.log*
+
+# Dependency directories
+jspm_packages
+
+# Build directories
+build
+coverage
