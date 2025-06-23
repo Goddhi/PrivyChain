@@ -69,7 +69,7 @@ func healthCheckHandler(c *gin.Context) {
 	utils.SuccessResponse(c, map[string]interface{}{
 		"status":    "healthy",
 		"service":   "privychain-backend",
-		"timestamp": "2024-01-01T00:00:00Z", // You'd use time.Now() in real implementation
+		"timestamp": "2025-01-01T00:00:00Z", 
 		"version":   "1.0.0",
 	})
 }
