@@ -6,22 +6,23 @@ import (
 )
 
 type FileRecord struct {
-	ID              uint           `json:"id" gorm:"primaryKey"`
-	CID             string         `json:"cid" gorm:"uniqueIndex"`
-	UploaderAddr    string         `json:"uploader_address"`
-	FileSize        int64          `json:"file_size"`
-	IsEncrypted     bool           `json:"is_encrypted"`
-	FileName        string         `json:"file_name"`
-	ContentType     string         `json:"content_type"`
-	Metadata        string         `json:"metadata"`
-	StorageProvider string         `json:"storage_provider"`
-	TxHash          string         `json:"tx_hash"`
-	Status          string         `json:"status"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
+    ID              uint           `json:"id" gorm:"primaryKey"`
+    CID             string         `json:"cid" gorm:"column:cid;uniqueIndex"`  // Explicitly set column name
+    UploaderAddr    string         `json:"uploader_address"`
+    FileSize        int64          `json:"file_size"`
+    IsEncrypted     bool           `json:"is_encrypted"`
+    FileName        string         `json:"file_name"`
+    ContentType     string         `json:"content_type"`
+    Metadata        string         `json:"metadata"`
+    StorageProvider string         `json:"storage_provider"`
+    TxHash          string         `json:"tx_hash"`
+    Status          string         `json:"status"`
+	AccessCount     int64          `json:"access_count" gorm:"default:0"`
+	DownloadCount   int64          `json:"download_count" gorm:"default:0"`
+    CreatedAt       time.Time      `json:"created_at"`
+    UpdatedAt       time.Time      `json:"updated_at"`
+    DeletedAt       gorm.DeletedAt `gorm:"index"`
 }
-
 type EncryptionKey struct {
 	UserAddress string         `json:"user_address" gorm:"primaryKey"`
 	PublicKey   string         `json:"public_key"`
@@ -32,14 +33,14 @@ type EncryptionKey struct {
 }
 
 type AccessGrant struct {
-	ID          uint           `json:"id" gorm:"primaryKey"`
-	CID         string         `json:"cid"`
-	GranterAddr string         `json:"granter_address"`
-	GranteeAddr string         `json:"grantee_address"`
-	ExpiresAt   time.Time      `json:"expires_at"`
-	IsActive    bool           `json:"is_active"`
-	CreatedAt   time.Time      `json:"created_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index"`
+    ID          uint           `json:"id" gorm:"primaryKey"`
+    CID         string         `json:"cid" gorm:"column:cid"`  // Explicitly set column name
+    GranterAddr string         `json:"granter_address"`
+    GranteeAddr string         `json:"grantee_address"`
+    ExpiresAt   time.Time      `json:"expires_at"`
+    IsActive    bool           `json:"is_active"`
+    CreatedAt   time.Time      `json:"created_at"`
+    DeletedAt   gorm.DeletedAt `gorm:"index"`
 }
 
 type UserStats struct {

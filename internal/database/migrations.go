@@ -189,16 +189,16 @@ func migration001Down(db *gorm.DB) error {
 
 // Migration 002: Add indexes
 func migration002Up(db *gorm.DB) error {
-	indexes := []string{
-		"CREATE INDEX IF NOT EXISTS idx_file_records_uploader_addr ON file_records(uploader_addr)",
-		"CREATE INDEX IF NOT EXISTS idx_file_records_status ON file_records(status)",
-		"CREATE INDEX IF NOT EXISTS idx_file_records_created_at ON file_records(created_at)",
-		"CREATE INDEX IF NOT EXISTS idx_file_records_is_encrypted ON file_records(is_encrypted)",
-		"CREATE INDEX IF NOT EXISTS idx_access_grants_cid ON access_grants(cid)",
-		"CREATE INDEX IF NOT EXISTS idx_access_grants_grantee_addr ON access_grants(grantee_addr)",
-		"CREATE INDEX IF NOT EXISTS idx_access_grants_expires_at ON access_grants(expires_at)",
-		"CREATE INDEX IF NOT EXISTS idx_encryption_keys_user_address ON encryption_keys(user_address)",
-	}
+    indexes := []string{
+        "CREATE INDEX IF NOT EXISTS idx_file_records_uploader_addr ON file_records(uploader_addr)",
+        "CREATE INDEX IF NOT EXISTS idx_file_records_status ON file_records(status)", 
+        "CREATE INDEX IF NOT EXISTS idx_file_records_created_at ON file_records(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_file_records_is_encrypted ON file_records(is_encrypted)",
+        "CREATE INDEX IF NOT EXISTS idx_access_grants_c_id ON access_grants(c_id)", // Changed from cid to c_id
+        "CREATE INDEX IF NOT EXISTS idx_access_grants_grantee_addr ON access_grants(grantee_addr)",
+        "CREATE INDEX IF NOT EXISTS idx_access_grants_expires_at ON access_grants(expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_encryption_keys_user_address ON encryption_keys(user_address)",
+    }
 
 	for _, indexSQL := range indexes {
 		if err := db.Exec(indexSQL).Error; err != nil {
