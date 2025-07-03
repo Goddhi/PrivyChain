@@ -1,5 +1,49 @@
 {
+  "name": "privychain-backend",
+  "version": "1.0.0",
+  "description": "PrivyChain - Encrypted file storage with Web3.Storage and blockchain incentives",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "setup": "node setup.js",
+    "test": "node test.js",
+    "test:dev": "SKIP_SIGNATURE_VERIFICATION=true node test.js",
+    "migrate": "node scripts/migrate-from-go.js",
+    "check": "node --check server.js",
+    "lint": "echo 'No linter configured. Consider adding ESLint for production.'",
+    "db:backup": "node scripts/db-utils.js backup",
+    "db:cleanup": "node scripts/db-utils.js cleanup",
+    "db:stats": "node scripts/db-utils.js stats",
+    "health": "curl -s http://localhost:8080/api/v1/health | node -e 'console.log(JSON.stringify(JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")), null, 2))'",
+    "logs": "tail -f privychain.log",
+    "reset": "rm -f privychain.db .env && npm run setup"
+  },
   "dependencies": {
-    "@openzeppelin/contracts": "^5.3.0"
-  }
+    "@web3-storage/w3up-client": "^17.3.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.1.5",
+    "ethers": "^5.7.2",
+    "sqlite3": "^5.1.6",
+    "sqlite": "^5.1.1",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "web3",
+    "ipfs",
+    "filecoin",
+    "encryption",
+    "blockchain",
+    "decentralized-storage"
+  ],
+  "author": "PrivyChain Team",
+  "license": "MIT"
 }
