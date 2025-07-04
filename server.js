@@ -1,4 +1,3 @@
-// server.js - Main PrivyChain backend (updated for existing env compatibility)
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
@@ -11,10 +10,9 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import dotenv from 'dotenv';
 
-// Load environment variables
 dotenv.config();
 
-const app = express();
+const app = express(); 
 const PORT = process.env.PORT || 8080;
 
 // Middleware
@@ -28,6 +26,303 @@ app.use(rateLimit({
 // Global state
 let w3upClient = null;
 let db = null;
+
+// PrivyChain Contract ABI
+const PRIVYCHAIN_ABI = [
+    // File operations
+    "function recordUpload(bytes32 cid, uint256 fileSize, bool isEncrypted, string calldata metadata) external",
+    "function claimUploadReward(bytes32 cid) external",
+    "function batchClaimRewards(bytes32[] calldata cids) external",
+    
+    // Access control
+    "function grantAccess(bytes32 cid, address grantee, uint256 duration) external",
+    "function revokeAccess(bytes32 cid, address grantee) external",
+    "function hasAccess(bytes32 cid, address viewer) external view returns (bool)",
+    
+    // View functions
+    "function getFileRecord(bytes32 cid) external view returns (tuple(bytes32 cid, address uploader, uint256 timestamp, uint256 fileSize, bool isEncrypted, bool rewardClaimed, string metadata))",
+    "function getUserUploads(address user) external view returns (bytes32[] memory)",
+    "function getAccessGrant(bytes32 cid, address grantee) external view returns (tuple(address granter, address grantee, uint256 expiresAt, bool isActive))",
+    "function calculateReward(uint256 fileSize, bool isEncrypted) public view returns (uint256)",
+    
+    // Configuration
+    "function baseRewardAmount() external view returns (uint256)",
+    "function sizeMultiplier() external view returns (uint256)",
+    "function encryptionBonus() external view returns (uint256)",
+    "function totalFilesStored() external view returns (uint256)",
+    "function totalRewardsDistributed() external view returns (uint256)",
+    "function totalStorageUsed() external view returns (uint256)",
+    "function userRewardBalance(address user) external view returns (uint256)",
+    
+    // Events
+    "event FileUploaded(bytes32 indexed cid, address indexed uploader, uint256 fileSize, bool isEncrypted, uint256 timestamp)",
+    "event RewardClaimed(bytes32 indexed cid, address indexed uploader, uint256 rewardAmount, uint256 timestamp)",
+    "event AccessGranted(bytes32 indexed cid, address indexed granter, address indexed grantee, uint256 expiresAt)",
+    "event AccessRevoked(bytes32 indexed cid, address indexed granter, address indexed grantee)"
+];
+
+// Contract Service Class
+class PrivyChainContractService {
+    constructor() {
+        this.provider = null;
+        this.contract = null;
+        this.wallet = null;
+        this.isReady = false;
+    }
+
+    async initialize() {
+        try {
+            console.log('🔗 Initializing PrivyChain contract service...');
+            
+            // Initialize provider
+            this.provider = new ethers.JsonRpcProvider(process.env.ETHEREUM_RPC);
+            
+            // Initialize wallet for sending transactions
+            if (process.env.PRIVATE_KEY) {
+                this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+                console.log(`✅ Wallet connected: ${this.wallet.address}`);
+                
+                // Check wallet balance
+                const balance = await this.provider.getBalance(this.wallet.address);
+                console.log(`💰 Wallet balance: ${ethers.formatEther(balance)} FIL`);
+            }
+
+            // Initialize contract
+            if (process.env.CONTRACT_ADDRESS) {
+                this.contract = new ethers.Contract(
+                    process.env.CONTRACT_ADDRESS,
+                    PRIVYCHAIN_ABI,
+                    this.wallet || this.provider
+                );
+                
+                // Verify contract is deployed
+                const code = await this.provider.getCode(process.env.CONTRACT_ADDRESS);
+                if (code === "0x") {
+                    throw new Error("No contract found at the specified address");
+                }
+                
+                console.log(`✅ PrivyChain contract connected: ${process.env.CONTRACT_ADDRESS}`);
+                
+                // Get contract info
+                try {
+                    const totalFiles = await this.contract.totalFilesStored();
+                    const totalRewards = await this.contract.totalRewardsDistributed();
+                    console.log(`📊 Contract stats: ${totalFiles} files, ${ethers.formatEther(totalRewards)} FIL rewards`);
+                } catch (error) {
+                    console.log('⚠️ Could not fetch contract stats (contract might be paused)');
+                }
+                
+                this.isReady = true;
+            } else {
+                console.log('⚠️ No contract address configured');
+            }
+
+            return this.isReady;
+        } catch (error) {
+            console.error('❌ Contract service initialization failed:', error.message);
+            return false;
+        }
+    }
+
+    // Convert string CID to bytes32
+    cidToBytes32(cidString) {
+        // Remove 'Qm' prefix if present and convert to bytes32
+        const cleanCid = cidString.startsWith('Qm') ? cidString.slice(2) : cidString;
+        return ethers.keccak256(ethers.toUtf8Bytes(cleanCid));
+    }
+
+    // Record file upload on blockchain
+    async recordFileUpload(cid, fileSize, isEncrypted, metadata, uploaderAddress) {
+        if (!this.isReady || !this.wallet) {
+            console.log('⚠️ Contract not ready or no wallet, skipping blockchain recording');
+            return null;
+        }
+
+        try {
+            console.log(`📝 Recording file upload on blockchain: ${cid}`);
+            
+            const cidBytes32 = this.cidToBytes32(cid);
+            const metadataJson = JSON.stringify(metadata || {});
+            
+            // Estimate gas first
+            const gasEstimate = await this.contract.recordUpload.estimateGas(
+                cidBytes32,
+                fileSize,
+                isEncrypted,
+                metadataJson
+            );
+            
+            console.log(`⛽ Estimated gas: ${gasEstimate.toString()}`);
+            
+            // Send transaction with higher gas limit
+            const tx = await this.contract.recordUpload(
+                cidBytes32,
+                fileSize,
+                isEncrypted,
+                metadataJson,
+                {
+                    gasLimit: gasEstimate * 120n / 100n // 20% buffer
+                }
+            );
+            
+            console.log(`📤 Transaction sent: ${tx.hash}`);
+            const receipt = await tx.wait();
+            
+            console.log(`✅ File recorded on blockchain! Block: ${receipt.blockNumber}`);
+            return receipt.hash;
+            
+        } catch (error) {
+            console.error('❌ Failed to record file on blockchain:', error.message);
+            return null;
+        }
+    }
+
+    // Get file record from blockchain
+    async getFileRecord(cid) {
+        if (!this.isReady) {
+            return null;
+        }
+
+        try {
+            const cidBytes32 = this.cidToBytes32(cid);
+            const record = await this.contract.getFileRecord(cidBytes32);
+            
+            return {
+                cid: record[0],
+                uploader: record[1],
+                timestamp: record[2].toString(),
+                fileSize: record[3].toString(),
+                isEncrypted: record[4],
+                rewardClaimed: record[5],
+                metadata: record[6]
+            };
+        } catch (error) {
+            console.error('❌ Failed to get file record from blockchain:', error.message);
+            return null;
+        }
+    }
+
+    // Check if user has access to file
+    async checkFileAccess(cid, userAddress) {
+        if (!this.isReady) {
+            return false;
+        }
+
+        try {
+            const cidBytes32 = this.cidToBytes32(cid);
+            return await this.contract.hasAccess(cidBytes32, userAddress);
+        } catch (error) {
+            console.error('❌ Failed to check file access:', error.message);
+            return false;
+        }
+    }
+
+    // Grant access to file
+    async grantFileAccess(cid, granteeAddress, duration = 0) {
+        if (!this.isReady || !this.wallet) {
+            console.log('⚠️ Contract not ready or no wallet');
+            return null;
+        }
+
+        try {
+            console.log(`🔐 Granting access on blockchain: ${cid} to ${granteeAddress}`);
+            
+            const cidBytes32 = this.cidToBytes32(cid);
+            
+            const tx = await this.contract.grantAccess(
+                cidBytes32,
+                granteeAddress,
+                duration
+            );
+            
+            const receipt = await tx.wait();
+            console.log(`✅ Access granted on blockchain! TX: ${receipt.hash}`);
+            return receipt.hash;
+            
+        } catch (error) {
+            console.error('❌ Failed to grant access on blockchain:', error.message);
+            return null;
+        }
+    }
+
+    // Calculate reward for file
+    async calculateReward(fileSize, isEncrypted) {
+        if (!this.isReady) {
+            return "0";
+        }
+
+        try {
+            const reward = await this.contract.calculateReward(fileSize, isEncrypted);
+            return ethers.formatEther(reward);
+        } catch (error) {
+            console.error('❌ Failed to calculate reward:', error.message);
+            return "0";
+        }
+    }
+
+    // Get user's uploaded files from blockchain
+    async getUserUploads(userAddress) {
+        if (!this.isReady) {
+            return [];
+        }
+
+        try {
+            const uploads = await this.contract.getUserUploads(userAddress);
+            return uploads.map(cid => cid.toString());
+        } catch (error) {
+            console.error('❌ Failed to get user uploads:', error.message);
+            return [];
+        }
+    }
+
+    // Get contract statistics
+    async getContractStats() {
+        if (!this.isReady) {
+            return null;
+        }
+
+        try {
+            const [totalFiles, totalRewards, totalStorage, baseReward, sizeMultiplier, encryptionBonus] = await Promise.all([
+                this.contract.totalFilesStored(),
+                this.contract.totalRewardsDistributed(),
+                this.contract.totalStorageUsed(),
+                this.contract.baseRewardAmount(),
+                this.contract.sizeMultiplier(),
+                this.contract.encryptionBonus()
+            ]);
+
+            return {
+                totalFiles: totalFiles.toString(),
+                totalRewardsDistributed: ethers.formatEther(totalRewards),
+                totalStorageUsed: totalStorage.toString(),
+                baseRewardAmount: ethers.formatEther(baseReward),
+                sizeMultiplier: sizeMultiplier.toString(),
+                encryptionBonus: ethers.formatEther(encryptionBonus)
+            };
+        } catch (error) {
+            console.error('❌ Failed to get contract stats:', error.message);
+            return null;
+        }
+    }
+
+    // Get user reward balance
+    async getUserRewardBalance(userAddress) {
+        if (!this.isReady) {
+            return "0";
+        }
+
+        try {
+            const balance = await this.contract.userRewardBalance(userAddress);
+            return ethers.formatEther(balance);
+        } catch (error) {
+            console.error('❌ Failed to get user reward balance:', error.message);
+            return "0";
+        }
+    }
+}
+
+// Initialize contract service
+const contractService = new PrivyChainContractService();
 
 // Initialize database
 async function initializeDatabase() {
@@ -207,7 +502,7 @@ class AuthService {
 // API Routes
 
 // Health check (enhanced with environment info)
-app.get('/api/v1/health', (req, res) => {
+app.get('/health', (req, res) => {
     res.json({
         success: true,
         data: {
@@ -217,6 +512,7 @@ app.get('/api/v1/health', (req, res) => {
             timestamp: new Date().toISOString(),
             w3up_ready: w3upClient !== null,
             database_ready: db !== null,
+            contract_ready: contractService.isReady,
             environment: {
                 node_env: process.env.NODE_ENV || process.env.ENVIRONMENT,
                 has_web3_token: !!process.env.WEB3_STORAGE_TOKEN,
@@ -228,8 +524,8 @@ app.get('/api/v1/health', (req, res) => {
     });
 });
 
-// File upload (unchanged but with better error messages)
-app.post('/api/v1/upload', async (req, res) => {
+// File upload (enhanced with blockchain integration)
+app.post('/upload', async (req, res) => {
     try {
         const { file, file_name, content_type, should_encrypt, metadata, user_address, signature } = req.body;
         
@@ -279,11 +575,30 @@ app.post('/api/v1/upload', async (req, res) => {
         const cid = await w3upClient.uploadFile(fileObj);
         console.log(`✅ Upload successful! CID: ${cid}`);
         
+        // Record on blockchain
+        let txHash = null;
+        let expectedReward = "0";
+        try {
+            // Calculate expected reward
+            expectedReward = await contractService.calculateReward(fileBuffer.length, should_encrypt);
+            
+            // Record upload on blockchain
+            txHash = await contractService.recordFileUpload(
+                cid.toString(),
+                fileBuffer.length,
+                should_encrypt,
+                metadata,
+                user_address
+            );
+        } catch (error) {
+            console.log('⚠️ Blockchain recording failed, continuing with database only:', error.message);
+        }
+        
         // Store in database
         await db.run(`
             INSERT INTO file_records 
-            (cid, uploader_addr, file_size, is_encrypted, file_name, content_type, metadata, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (cid, uploader_addr, file_size, is_encrypted, file_name, content_type, metadata, status, tx_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             cid.toString(),
             user_address,
@@ -292,7 +607,8 @@ app.post('/api/v1/upload', async (req, res) => {
             file_name,
             content_type,
             JSON.stringify(metadata || {}),
-            'confirmed'
+            'confirmed',
+            txHash
         ]);
         
         res.json({
@@ -302,7 +618,10 @@ app.post('/api/v1/upload', async (req, res) => {
                 file_size: fileBuffer.length,
                 is_encrypted: should_encrypt,
                 status: 'confirmed',
-                gateway_url: `https://w3s.link/ipfs/${cid}`
+                gateway_url: `https://w3s.link/ipfs/${cid}`,
+                tx_hash: txHash,
+                blockchain_stored: !!txHash,
+                expected_reward_fil: expectedReward
             }
         });
         
@@ -316,9 +635,8 @@ app.post('/api/v1/upload', async (req, res) => {
     }
 });
 
-// [Rest of the API routes remain the same as in the original server.js]
 // File retrieval
-app.post('/api/v1/retrieve', async (req, res) => {
+app.post('/retrieve', async (req, res) => {
     try {
         const { cid, user_address, signature } = req.body;
         
@@ -396,8 +714,8 @@ app.post('/api/v1/retrieve', async (req, res) => {
     }
 });
 
-// Grant access
-app.post('/api/v1/access/grant', async (req, res) => {
+// Grant access (enhanced with blockchain integration)
+app.post('/access/grant', async (req, res) => {
     try {
         const { cid, grantee, duration, granter, signature } = req.body;
         
@@ -430,7 +748,15 @@ app.post('/api/v1/access/grant', async (req, res) => {
             });
         }
         
-        // Create access grant
+        // Grant access on blockchain
+        let blockchainTxHash = null;
+        try {
+            blockchainTxHash = await contractService.grantFileAccess(cid, grantee, duration || 0);
+        } catch (error) {
+            console.log('⚠️ Blockchain access grant failed, continuing with database only');
+        }
+        
+        // Create access grant in database
         const expiresAt = duration ? 
             new Date(Date.now() + duration * 1000).toISOString() : 
             new Date('2099-12-31').toISOString();
@@ -446,7 +772,8 @@ app.post('/api/v1/access/grant', async (req, res) => {
                 cid,
                 grantee,
                 expires_at: expiresAt,
-                granted_at: new Date().toISOString()
+                granted_at: new Date().toISOString(),
+                blockchain_tx: blockchainTxHash
             }
         });
         
@@ -459,12 +786,83 @@ app.post('/api/v1/access/grant', async (req, res) => {
     }
 });
 
-// User stats
-app.get('/api/v1/users/:address/stats', async (req, res) => {
+app.post('/rewards/claim', async (req, res) => {
+    try {
+        const { cid, user_address, signature } = req.body;
+        
+        if (!cid || !user_address || !signature) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields'
+            });
+        }
+        
+        if (!AuthService.verifySignature(user_address, signature, cid)) {
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid signature'
+            });
+        }
+        
+        const fileRecord = await db.get(
+            'SELECT * FROM file_records WHERE cid = ? AND uploader_addr = ?',
+            [cid, user_address]
+        );
+        
+        if (!fileRecord) {
+            return res.status(404).json({
+                success: false,
+                error: 'File not found or not owned by user'
+            });
+        }
+        
+        if (!contractService.isReady) {
+            return res.status(503).json({
+                success: false,
+                error: 'Blockchain service not available'
+            });
+        }
+        
+        try {
+            // Claim reward on blockchain
+            const cidBytes32 = contractService.cidToBytes32(cid);
+            const tx = await contractService.contract.claimUploadReward(cidBytes32);
+            const receipt = await tx.wait();
+            
+            res.json({
+                success: true,
+                data: {
+                    cid,
+                    tx_hash: receipt.hash,
+                    block_number: receipt.blockNumber,
+                    message: 'Reward claimed successfully'
+                }
+            });
+            
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                error: 'Failed to claim reward',
+                details: error.message.includes('already claimed') ? 'Reward already claimed' : 'Claiming failed'
+            });
+        }
+        
+    } catch (error) {
+        console.error('Claim reward error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to process reward claim'
+        });
+    }
+});
+
+// User stats (enhanced with blockchain data)
+app.get('/users/:address/stats', async (req, res) => {
     try {
         const { address } = req.params;
         
-        const stats = await db.get(`
+        // Get database stats
+        const dbStats = await db.get(`
             SELECT 
                 COUNT(*) as total_files,
                 SUM(file_size) as total_size,
@@ -473,13 +871,45 @@ app.get('/api/v1/users/:address/stats', async (req, res) => {
             WHERE uploader_addr = ?
         `, [address]);
         
+        // Get blockchain stats
+        let blockchainStats = {
+            reward_balance: "0",
+            blockchain_files: [],
+            can_claim_rewards: false
+        };
+        
+        try {
+            if (contractService.isReady) {
+                const [rewardBalance, userUploads] = await Promise.all([
+                    contractService.getUserRewardBalance(address),
+                    contractService.getUserUploads(address)
+                ]);
+                
+                blockchainStats = {
+                    reward_balance: rewardBalance,
+                    blockchain_files: userUploads,
+                    can_claim_rewards: userUploads.length > 0
+                };
+            }
+        } catch (error) {
+            console.log('⚠️ Could not fetch blockchain stats');
+        }
+        
         res.json({
             success: true,
             data: {
-                total_files: stats.total_files || 0,
-                total_size_bytes: stats.total_size || 0,
-                encrypted_files: stats.encrypted_files || 0,
-                rewards_earned: stats.total_files || 0 // Mock calculation
+                // Database stats
+                total_files: dbStats.total_files || 0,
+                total_size_bytes: dbStats.total_size || 0,
+                encrypted_files: dbStats.encrypted_files || 0,
+                
+                // Blockchain stats
+                reward_balance_fil: blockchainStats.reward_balance,
+                blockchain_files_count: blockchainStats.blockchain_files.length,
+                can_claim_rewards: blockchainStats.can_claim_rewards,
+                
+                // Combined
+                rewards_earned: dbStats.total_files || 0 // Mock calculation
             }
         });
         
@@ -493,7 +923,7 @@ app.get('/api/v1/users/:address/stats', async (req, res) => {
 });
 
 // User files
-app.get('/api/v1/users/:address/files', async (req, res) => {
+app.get('/users/:address/files', async (req, res) => {
     try {
         const { address } = req.params;
         const page = parseInt(req.query.page) || 1;
@@ -534,6 +964,104 @@ app.get('/api/v1/users/:address/files', async (req, res) => {
     }
 });
 
+// Contract statistics
+app.get('/contract/stats', async (req, res) => {
+    try {
+        if (!contractService.isReady) {
+            return res.json({
+                success: false,
+                error: 'Contract not available'
+            });
+        }
+        
+        const stats = await contractService.getContractStats();
+        
+        if (!stats) {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to fetch contract statistics'
+            });
+        }
+        
+        res.json({
+            success: true,
+            data: {
+                contract_address: process.env.CONTRACT_ADDRESS,
+                network: "Filecoin Calibration Testnet",
+                total_files_stored: stats.totalFiles,
+                total_rewards_distributed_fil: stats.totalRewardsDistributed,
+                total_storage_used_bytes: stats.totalStorageUsed,
+                reward_config: {
+                    base_reward_fil: stats.baseRewardAmount,
+                    size_multiplier: stats.sizeMultiplier,
+                    encryption_bonus_fil: stats.encryptionBonus
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('Contract stats error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get contract statistics'
+        });
+    }
+});
+
+// Contract status
+app.get('/contract/status', async (req, res) => {
+    try {
+        if (!contractService.provider || !process.env.CONTRACT_ADDRESS) {
+            return res.json({
+                success: false,
+                error: 'Contract not configured'
+            });
+        }
+
+        const code = await contractService.provider.getCode(process.env.CONTRACT_ADDRESS);
+        const balance = await contractService.provider.getBalance(process.env.CONTRACT_ADDRESS);
+        
+        // Get wallet info if available
+        let walletInfo = null;
+        if (contractService.wallet) {
+            const walletBalance = await contractService.provider.getBalance(contractService.wallet.address);
+            walletInfo = {
+                address: contractService.wallet.address,
+                balance_fil: ethers.formatEther(walletBalance)
+            };
+        }
+
+        // Get contract stats if available
+        let contractStats = null;
+        if (contractService.isReady) {
+            contractStats = await contractService.getContractStats();
+        }
+
+        res.json({
+            success: true,
+            data: {
+                contract_address: process.env.CONTRACT_ADDRESS,
+                network: "Filecoin Calibration Testnet",
+                rpc_url: process.env.ETHEREUM_RPC,
+                is_deployed: code !== "0x",
+                bytecode_length: code.length,
+                contract_balance_fil: ethers.formatEther(balance),
+                wallet: walletInfo,
+                can_write: !!contractService.wallet,
+                is_ready: contractService.isReady,
+                stats: contractStats
+            }
+        });
+        
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Failed to check contract status',
+            details: error.message
+        });
+    }
+});
+
 // Helper functions
 async function checkFileAccess(cid, userAddress) {
     // Check if user is the uploader
@@ -544,14 +1072,26 @@ async function checkFileAccess(cid, userAddress) {
     
     if (fileRecord) return true;
     
-    // Check access grants
+    // Check database access grants
     const grant = await db.get(`
         SELECT * FROM access_grants 
         WHERE cid = ? AND grantee_addr = ? AND is_active = 1 
         AND (expires_at IS NULL OR expires_at > datetime('now'))
     `, [cid, userAddress]);
     
-    return !!grant;
+    if (grant) return true;
+    
+    // Check blockchain access grants if contract is available
+    if (contractService.isReady) {
+        try {
+            const hasBlockchainAccess = await contractService.checkFileAccess(cid, userAddress);
+            if (hasBlockchainAccess) return true;
+        } catch (error) {
+            console.log('⚠️ Could not check blockchain access');
+        }
+    }
+    
+    return false;
 }
 
 // Initialize and start server
@@ -572,6 +1112,10 @@ async function startServer() {
         await initializeDatabase();
         const w3upReady = await initializeW3up();
         
+        // Initialize contract service
+        const contractReady = await contractService.initialize();
+        console.log(`📝 Smart Contract: ${contractReady ? '✅ Connected' : '⚠️ Not available'}`);
+        
         if (!w3upReady) {
             console.log('⚠️  Storage service not ready. File uploads will not work.');
             console.log('💡 Your existing Web3.Storage configuration should work automatically.');
@@ -583,14 +1127,19 @@ async function startServer() {
             console.log('✅ PrivyChain backend is running!');
             console.log('=================================');
             console.log(`🌐 Server: http://localhost:${PORT}`);
-            console.log(`📊 Health: http://localhost:${PORT}/api/v1/health`);
-            console.log(`📤 Upload: http://localhost:${PORT}/api/v1/upload`);
+            console.log(`📊 Health: http://localhost:${PORT}/health`);
+            console.log(`📤 Upload: http://localhost:${PORT}/upload`);
+            console.log(`🏆 Rewards: http://localhost:${PORT}/rewards/claim`);
+            console.log(`📈 Contract: http://localhost:${PORT}/contract/status`);
             console.log('');
             
             if (!w3upReady) {
                 console.log('⚠️  Note: File uploads may not work until storage is configured');
-                console.log('');
             }
+            if (!contractReady) {
+                console.log('⚠️  Note: Blockchain features disabled until contract is available');
+            }
+            console.log('');
         });
         
     } catch (error) {
