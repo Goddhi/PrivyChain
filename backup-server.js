@@ -61,7 +61,6 @@ const PRIVYCHAIN_ABI = [
     "event AccessRevoked(bytes32 indexed cid, address indexed granter, address indexed grantee)"
 ];
 
-
 // Complete Contract Service Class with Automatic Rewards
 class PrivyChainContractService {
     constructor() {
@@ -517,40 +516,31 @@ class EncryptionService {
     }
 }
 
+// Authentication utilities
 class AuthService {
-    static isValidAddress(address) {
+    static verifySignature(address, signature, message) {
+        // Skip verification in development
+        if (process.env.SKIP_SIGNATURE_VERIFICATION === 'true') {
+            console.log('⚠️  Signature verification bypassed for development');
+            return this.isValidSignatureFormat(signature);
+        }
+        
         try {
-            return ethers.isAddress(address);
+            const recoveredAddress = ethers.verifyMessage(message, signature);
+            return recoveredAddress.toLowerCase() === address.toLowerCase();
         } catch (error) {
-            console.error('Address validation error:', error);
+            console.error('Signature verification failed:', error);
             return false;
         }
-    }
-
-    static validateRequest(req) {
-        const errors = [];
-        
-        if (!req.user_address) {
-            errors.push({ field: 'user_address', message: 'User address is required' });
-        } else if (!this.isValidAddress(req.user_address)) {
-            errors.push({ field: 'user_address', message: 'Invalid Ethereum address' });
-        }
-        
-        return errors;
-    }
-    
-    // Keep these methods for any remaining code that might reference them
-    static verifySignature(address, signature, message) {
-        console.log('⚠️  Signature verification bypassed');
-        return true;
     }
     
     static isValidSignatureFormat(signature) {
         return signature && 
                signature.startsWith('0x') && 
-               signature.length === 132;
+               signature.length === 132; // 0x + 130 hex chars
     }
 }
+
 // API Routes
 
 // Health check
@@ -579,21 +569,13 @@ app.get('/health', (req, res) => {
 // File upload with automatic reward distribution
 app.post('/upload', async (req, res) => {
     try {
-        const { file, file_name, content_type, should_encrypt, metadata, user_address } = req.body;
+        const { file, file_name, content_type, should_encrypt, metadata, user_address, signature } = req.body;
         
-        // Basic validation only
-        if (!file || !file_name || !user_address) {
+        // Validation
+        if (!file || !file_name || !user_address || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing required fields: file, file_name, user_address'
-            });
-        }
-        
-        // Validate Ethereum address format
-        if (!AuthService.isValidAddress(user_address)) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid Ethereum address format'
+                error: 'Missing required fields'
             });
         }
         
@@ -605,26 +587,18 @@ app.post('/upload', async (req, res) => {
             });
         }
         
+        // Verify signature
+        if (!AuthService.verifySignature(user_address, signature, file)) {
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid signature'
+            });
+        }
+        
         console.log(`🔄 Processing upload: ${file_name} for ${user_address}`);
         
         // Convert base64 to buffer
-        let fileBuffer;
-        try {
-            fileBuffer = Buffer.from(file, 'base64');
-        } catch (error) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid base64 file data'
-            });
-        }
-        
-        // Validate file size (100MB limit)
-        if (fileBuffer.length > 100 * 1024 * 1024) {
-            return res.status(400).json({
-                success: false,
-                error: 'File size exceeds 100MB limit'
-            });
-        }
+        const fileBuffer = Buffer.from(file, 'base64');
         
         // Encrypt if requested
         let fileToUpload = fileBuffer;
@@ -748,26 +722,27 @@ app.post('/upload', async (req, res) => {
         });
     }
 });
+
 // File retrieval
 app.post('/retrieve', async (req, res) => {
     try {
-        const { cid, user_address } = req.body;
+        const { cid, user_address, signature } = req.body;
         
         console.log(`🔄 Retrieve request: ${cid} for ${user_address}`);
         
-        // Basic validation only
-        if (!cid || !user_address) {
+        // Validation
+        if (!cid || !user_address || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing required fields: cid, user_address'
+                error: 'Missing required fields'
             });
         }
         
-        // Validate Ethereum address format
-        if (!AuthService.isValidAddress(user_address)) {
-            return res.status(400).json({
+        // Verify signature
+        if (!AuthService.verifySignature(user_address, signature, cid)) {
+            return res.status(401).json({
                 success: false,
-                error: 'Invalid Ethereum address format'
+                error: 'Invalid signature'
             });
         }
         
@@ -851,32 +826,23 @@ app.post('/retrieve', async (req, res) => {
 });
 
 // Grant access
-// Simplified access grant endpoint - replace the existing /access/grant route
-
 app.post('/access/grant', async (req, res) => {
     try {
-        const { cid, grantee, duration, granter } = req.body;
+        const { cid, grantee, duration, granter, signature } = req.body;
         
-        // Basic validation only
-        if (!cid || !grantee || !granter) {
+        // Validation
+        if (!cid || !grantee || !granter || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing required fields: cid, grantee, granter'
+                error: 'Missing required fields'
             });
         }
         
-        // Validate Ethereum addresses
-        if (!AuthService.isValidAddress(granter)) {
-            return res.status(400).json({
+        // Verify signature
+        if (!AuthService.verifySignature(granter, signature, cid + grantee)) {
+            return res.status(401).json({
                 success: false,
-                error: 'Invalid granter address format'
-            });
-        }
-        
-        if (!AuthService.isValidAddress(grantee)) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid grantee address format'
+                error: 'Invalid signature'
             });
         }
         
@@ -889,18 +855,8 @@ app.post('/access/grant', async (req, res) => {
         if (!fileRecord) {
             return res.status(403).json({
                 success: false,
-                error: 'Not authorized to grant access - file not found or not owned by granter'
+                error: 'Not authorized to grant access'
             });
-        }
-        
-        // Grant access on blockchain (optional)
-        let blockchainTxHash = null;
-        try {
-            if (contractService.isContractReady()) {
-                blockchainTxHash = await contractService.grantFileAccess(cid, grantee, duration || 0);
-            }
-        } catch (error) {
-            console.log('⚠️ Blockchain access grant failed, continuing with database only');
         }
         
         // Create access grant in database
@@ -919,8 +875,7 @@ app.post('/access/grant', async (req, res) => {
                 cid,
                 grantee,
                 expires_at: expiresAt,
-                granted_at: new Date().toISOString(),
-                blockchain_tx: blockchainTxHash
+                granted_at: new Date().toISOString()
             }
         });
         
@@ -928,32 +883,27 @@ app.post('/access/grant', async (req, res) => {
         console.error('Grant access error:', error);
         res.status(500).json({
             success: false,
-            error: 'Failed to grant access',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: 'Failed to grant access'
         });
     }
 });
 
 // Manual reward claiming (backup option)
-// Simplified reward claim endpoint - replace the existing /rewards/claim route
-
 app.post('/rewards/claim', async (req, res) => {
     try {
-        const { cid, user_address } = req.body;
+        const { cid, user_address, signature } = req.body;
         
-        // Basic validation only
-        if (!cid || !user_address) {
+        if (!cid || !user_address || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing required fields: cid, user_address'
+                error: 'Missing required fields'
             });
         }
         
-        // Validate Ethereum address
-        if (!AuthService.isValidAddress(user_address)) {
-            return res.status(400).json({
+        if (!AuthService.verifySignature(user_address, signature, cid)) {
+            return res.status(401).json({
                 success: false,
-                error: 'Invalid Ethereum address format'
+                error: 'Invalid signature'
             });
         }
         
@@ -1010,8 +960,7 @@ app.post('/rewards/claim', async (req, res) => {
         console.error('Claim reward error:', error);
         res.status(500).json({
             success: false,
-            error: 'Failed to process reward claim',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: 'Failed to process reward claim'
         });
     }
 });

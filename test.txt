@@ -1,1 +1,56 @@
 Hello PrivyChain! Backend is working!
+
+curl -X POST https://privychain-dot-chainguardai.uc.r.appspot.com/upload \
+  -H "Content-Type: application/json" \
+  -d '{
+    "file": "QXV0b21hdddGljIHJld2FyZCR0ZfffXNfff0IQ==",
+    "file_name": "rewarddddd-test.txt",
+    "content_type": "text/plain",
+    "should_encrypt": false,
+    "user_address": "0xYOUR_ACTUAL_ADDRESS",
+    "signature": "0xREAL_SIGNATURE_FROM_METAMASK"
+  }'
+
+  0x14A0EBAdBaD5313b6f76C97cea8dc999D1C1da8B
+
+  curl "http://localhost:8080/auth/challenge/0x14A0EBAdBaD5313b6f76C97cea8dc999D1C1da8B"
+{"success":false,"error":"Invalid Ethereum address"}
+
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_address": "0x14A0EBAdBaD5313b6f76C97cea8dc999D1C1da8B",
+    "signature": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1c",
+    "message": "Welcome to PrivyChain!\n\nPlease sign this message to authenticate and access your files.\n\nAddress: 0x742d35Cc6aF6B1C6C8b8A4c6c5b8e2A7B8f9D1E2\nNonce: abc123def456\nTimestamp: 2025-07-06T12:00:00.000Z\n\nThis request will not trigger any blockchain transaction or cost gas fees."
+  }'
+
+
+  curl -X POST localhost:8080/upload \
+  -H "Content-Type: application/json" \
+  -d '{
+    "file": "QXV0b21hdddGljIHJld2FyZCR0ZfffXNfff0IQ==",
+    "file_name": "rewarddddd-test.txt",
+    "content_type": "text/plain",
+    "should_encrypt": false,
+    "user_address": "0x14A0EBAdBaD5313b6f76C97cea8dc999D1C1da8B",
+  }'
+
+
+  
+
+   curl -X POST https://privychain-dot-chainguardai.uc.r.appspot.com//upload   -H "Content-Type: application/json"   -d '{
+    "file": "QXV0b21hdddGoooHbbbJld2FyZCRnnggb0ZfffXNfff0IQ==",
+    "file_name": "rewadj-test.txt",
+    "content_type": "text/plain",
+    "should_encrypt": false,
+    "user_address": "0x56278bd0bC93af09768837a9e8feB774e59bD715"
+  }'
+
+    WEB3_STORAGE_TOKEN: "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"
+
+# Replace DID_FROM_STEP_1 with the actual DID from the key create command
+w3 delegation create did:key:z6Mkru17hdX19P1BSWb9sDiZ9ntARH3yMBKsb68QX9Z3JoWx \
+  --can 'store/add' \
+  --can 'upload/add' \
+  --can 'space/blob/add' \
+  --base64

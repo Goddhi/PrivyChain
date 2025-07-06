@@ -26,6 +26,7 @@ function askYesNo(question) {
     });
 }
 
+
 async function checkEnvironmentFile() {
     try {
         await fs.access('.env');
@@ -71,7 +72,7 @@ W3UP_EMAIL=${email}
 # BLOCKCHAIN CONFIGURATION (OPTIONAL)
 # =================================
 # For future blockchain integration
-ETHEREUM_RPC=https://api.node.glif.io
+ETHEREUM_RPC=https://api.calibration.node.glif.io/rpc/v1
 CONTRACT_ADDRESS=0x6E2ca2E8278ff38ce091Fc2cB5572ed7efd82f97
 PRIVATE_KEY=
 
@@ -327,3 +328,4 @@ async function enhancedSetup() {
 
 // Run enhanced setup
 enhancedSetup();
+
