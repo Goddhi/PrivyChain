@@ -1,5 +1,9 @@
 {
   "name": "hardhat-project",
+  "scripts": {
+    "deploy": "hardhat run scripts/deploy.ts --network calibration",
+    "deploy:testnet": "hardhat run scripts/deploy.ts --network calibration"
+  },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "hardhat": "^2.24.3"
